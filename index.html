@@ -327,7 +327,10 @@
 <div id="app">
   <header class="top">
     <div class="brand"><span class="dot"></span> StringTracker</div>
-    <div class="sub" id="headerSub">racchette · corde · incordature</div>
+    <div style="display:flex; align-items:center; gap:10px;">
+      <div class="sub" id="headerSub">racchette · corde · incordature</div>
+      <button class="iconbtn" id="settingsBtn" title="Backup">⚙︎</button>
+    </div>
   </header>
   <main id="main"></main>
 </div>
@@ -386,6 +389,86 @@ document.querySelectorAll("nav.tabs button").forEach(btn=>{
     render();
   });
 });
+
+document.getElementById("settingsBtn").addEventListener("click", openBackupSheet);
+
+function openBackupSheet(){
+  const stamp = new Date().toLocaleString("it-IT");
+  openSheet(`
+    <div class="sheet-handle"></div>
+    <h2>Backup dati</h2>
+    <p class="hint" style="margin-bottom:16px;">
+      ${db.rackets.length} racchette · ${db.strings.length} corde · ${db.jobs.length} incordature.<br>
+      I dati sono salvati solo su questo telefono. Esporta un file per fare backup o trasferirli su un altro dispositivo.
+    </p>
+    <button class="primary" style="width:100%; margin-bottom:10px;" onclick="exportData()">⬇️ Esporta file (.json)</button>
+    <button class="secondary" style="width:100%;" onclick="document.getElementById('importFile').click()">⬆️ Importa file</button>
+    <input type="file" id="importFile" accept="application/json" style="display:none" onchange="importData(event)">
+    <div class="hint" style="margin-top:14px;">Importando da un altro dispositivo puoi scegliere se unire ai dati esistenti o sostituirli del tutto.</div>
+  `);
+}
+
+function exportData(){
+  const payload = {
+    app: "StringTracker",
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    data: db
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], {type:"application/json"});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  const stamp = new Date().toISOString().slice(0,10);
+  a.href = url;
+  a.download = `stringtracker-backup-${stamp}.json`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url), 1000);
+}
+
+function importData(event){
+  const file = event.target.files[0];
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = (e)=>{
+    let parsed;
+    try{
+      parsed = JSON.parse(e.target.result);
+    }catch(err){
+      alert("File non valido: non è un JSON leggibile.");
+      return;
+    }
+    const incoming = parsed.data ? parsed.data : parsed;
+    if(!incoming || !Array.isArray(incoming.rackets) || !Array.isArray(incoming.strings) || !Array.isArray(incoming.jobs)){
+      alert("File non valido: struttura dati non riconosciuta.");
+      return;
+    }
+    const replace = confirm(
+      `File trovato: ${incoming.rackets.length} racchette, ${incoming.strings.length} corde, ${incoming.jobs.length} incordature.\n\nOK = SOSTITUISCI tutti i dati attuali con quelli del file.\nAnnulla = UNISCI ai dati attuali (evitando duplicati per id).`
+    );
+    if(replace){
+      db = { rackets: incoming.rackets, strings: incoming.strings, jobs: incoming.jobs };
+    } else {
+      const mergeById = (existing, incoming)=>{
+        const ids = new Set(existing.map(x=>x.id));
+        const merged = [...existing];
+        incoming.forEach(item=>{ if(!ids.has(item.id)) merged.push(item); });
+        return merged;
+      };
+      db = {
+        rackets: mergeById(db.rackets, incoming.rackets),
+        strings: mergeById(db.strings, incoming.strings),
+        jobs: mergeById(db.jobs, incoming.jobs),
+      };
+    }
+    saveDB();
+    closeSheet();
+    render();
+    alert("Importazione completata.");
+  };
+  reader.readAsText(file);
+}
 
 document.getElementById("fab").addEventListener("click", ()=>{
   if(activeTab==="rackets") openRacketForm();
